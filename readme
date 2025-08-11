@@ -1,0 +1,226 @@
+Docker Swarm 
+.
+├── app.py
+├── Dockerfile
+├── docker-stack.yaml
+└── requirements.txt
+
+app.py:
+import time
+import socket
+import os
+import redis
+from flask import Flask
+
+app = Flask(__name__)
+cache = redis.Redis(host='redis', port=6379)
+
+def get_hit_count():
+    retries = 5
+    while True:
+        try:
+            return cache.incr('hits')
+        except redis.exceptions.ConnectionError as exc:
+            if retries == 0:
+                raise exc
+            retries -= 1
+            time.sleep(0.5)
+
+@app.route('/')
+def hello():
+    count = get_hit_count()
+    container_id = socket.gethostname()
+    container_ip = socket.gethostbyname(container_id)
+    node_hostname = os.getenv('NODE_HOSTNAME', 'unknown')
+    
+    return (
+        f'Hello World! I have been seen {count} times.\n'
+        f'Container ID: {container_id}\n'
+        f'Container IP: {container_ip}\n'
+        f'Docker Node: {node_hostname}\n'
+        f'Redis Hits: {count}\n'
+    )
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0')
+
+
+Docker-stack.yaml:
+
+version: '3.8'
+
+services:
+  web:
+    image: mdirshaq/flask-redis-app-2
+    environment:
+      - NODE_HOSTNAME=${NODE_HOSTNAME}
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "8000:5000"
+    networks:
+      - app-network
+
+  redis:
+    image: redis:alpine
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+
+volumes:
+  redis-data:
+
+networks:
+  app-network:
+    driver: overlay
+
+
+
+
+
+
+Dockerfile:
+FROM python:3.10-slim
+WORKDIR /code
+ENV FLASK_APP=app.py
+ENV FLASK_RUN_HOST=0.0.0.0
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+CMD ["flask", "run", "--debug"]
+
+Requirements.txt:
+flask
+Redis
+
+Steps:
+# Build your image
+docker build -t yourusername/flask-redis-app .
+
+# Push to Docker Hub (or your private registry)
+docker login
+docker push yourusername/flask-redis-app
+
+ Initialize Docker Swarm (on Manager Node):
+# Initialize the swarm (replace <manager-ip> with your actual private IP)
+
+docker swarm init --advertise-addr <manager-ip>
+
+# You'll get a join command like this:
+# docker swarm join --token SWMTKN-1-xxxxx <manager-ip>:2377
+#join on worker node using the token
+docker node ls to list all the node in swarm 
+ 
+
+#set the node hostname variable on each Docker node
+# On each node, set its hostname as an environment variable
+export NODE_HOSTNAME=$(hostname)
+
+Deploy stack:
+docker stack deploy -c docker-stack.yml flask-app
+
+# List services
+docker service ls	
+ 
+
+Or 
+Execute docker ps cmd on each nodes to list the running containers
+
+# Check web service tasks
+docker service ps flask-app_web
+
+# Check redis service
+docker service ps flask-app_redis
+
+Scaling 
+docker service scale flask-app_web=4
+
+Test Your Application:
+Access the apk <YourPublicIP>:8000
+Verify the container id and ip for each refresh
+And remove the container in the worker node to see it recreating itself
+
+Rollback-service:
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Here's a clear breakdown of the key Docker Swarm commands and their purposes:
+
+### 1. `docker stack` Commands
+Purpose: Manage complete application stacks (multi-service deployments)
+
+Command	Purpose	Example
+docker stack deploy	Deploys/updates a stack from compose file	docker stack deploy -c docker-compose.yml myapp
+docker stack ls	Lists all stacks	docker stack ls
+docker stack ps	Shows tasks in a stack	docker stack ps myapp
+docker stack rm	Removes a stack	docker stack rm myapp
+
+Key Concept:  
+A *stack* is a collection of services that make up an application (e.g., web + redis + db).
+
+---
+
+### 2. `docker service` Commands  
+Purpose: Manage individual services within a swarm
+
+Command	Purpose	Example
+docker stack deploy	Deploys/updates a stack from compose file	docker stack deploy -c docker-compose.yml myapp
+docker stack ls	Lists all stacks	docker stack ls
+docker stack ps	Shows tasks in a stack	docker stack ps myapp
+docker stack rm	Removes a stack	docker stack rm myapp
+
+Key Concept:  
+A *service* is the definition of how containers should run (e.g., image, replicas, ports).
+
+---
+
+### 3. `docker node` Commands  
+Purpose: Manage swarm nodes
+
+Command	Purpose	Example
+docker node ls	Lists all nodes	docker node ls
+docker node ps	Shows tasks on a node	docker node ps node1
+docker node inspect	Shows node details	docker node inspect node1 --pretty
+docker node promote	Promotes worker → manager	docker node promote node2
+docker node demote	Demotes manager → worker	docker node demote node2
+docker node update	Updates node config	docker node update --availability drain node1
+
+Key Concept:  
+A *node* is a physical/virtual machine participating in the swarm.
+
+---
+
+### How They Work Together:
+1. Stack deploys → Services which run → Tasks (containers) on → Nodes
+### When to Use Each:
+- `stack`: When deploying full applications (production)
+- `service`: When managing individual components
+- `node`: When managing cluster infrastructure
+
+
+
