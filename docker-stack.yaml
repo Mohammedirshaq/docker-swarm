@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   web:
-    image: mdirshaq/flask-redis-app-2
+    image: YourRepoName/flask-redis-app-2
     environment:
       - NODE_HOSTNAME=${NODE_HOSTNAME}
     deploy:
